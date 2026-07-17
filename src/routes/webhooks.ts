@@ -1,53 +1,69 @@
 import { Router, Request, Response } from 'express';
-import { firestore, FieldValue } from '../config/firebase';
-import { getRazorpay, TIER_CONFIG } from '../config/razorpay';
-import { razorpayWebhookMiddleware } from '../middleware/webhook';
-const Timestamp = require('firebase-admin').firestore.Timestamp;
+import crypto from 'crypto';
+import User from '../models/User';
+import Payment from '../models/Payment';
+import Subscription from '../models/Subscription';
+
 const router = Router();
 
-router.post('/razorpay', razorpayWebhookMiddleware, async (req: Request, res: Response) => {
+function verifySignature(body: string, signature: string, secret: string): boolean {
+  const expected = crypto.createHmac('sha256', secret).update(body).digest('hex');
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+}
+
+router.post('/razorpay', async (req: Request, res: Response) => {
   try {
-    const event = req.body;
-    console.log('[Razorpay Webhook] Event:', event.event);
-    switch (event.event) {
-      case 'payment.captured': {
-        const p = event.payload.payment.entity, n = p.notes || {};
-        if (p.subscription_id) break;
-        await firestore().collection('payments').add({ paymentId: p.id, orderId: p.order_id, userId: n.userId || '', userEmail: n.userEmail || '', amount: p.amount / 100, status: 'success', method: p.method, purpose: n.purpose || 'general', itemId: n.itemId || '', itemTitle: n.itemTitle || '', paidAt: FieldValue.serverTimestamp() });
-        if (n.purpose === 'contest_entry' && n.itemId && n.userId) {
-          const e = await firestore().collection('contestEntries').where('contestId', '==', n.itemId).where('userId', '==', n.userId).get();
-          if (e.empty) { await firestore().collection('contestEntries').add({ contestId: n.itemId, contestTitle: n.itemTitle || '', userId: n.userId, userEmail: n.userEmail || '', videoLink: n.videoLink || '', votes: 0, juryScore: 0, finalScore: 0, paid: true, paymentId: p.id, createdAt: FieldValue.serverTimestamp() }); try { await firestore().collection('contests').doc(n.itemId).update({ entriesCount: FieldValue.increment(1) }); } catch {} }
-        }
-        if (n.purpose === 'film_upload' && n.itemId) { await firestore().collection('films').doc(n.itemId).update({ paid: true }); }
-        break;
-      }
-      case 'subscription.charged': {
-        const s = event.payload.subscription?.entity, sn = s?.notes || {};
-        if (s && sn.userId && sn.tier && TIER_CONFIG[sn.tier]) {
-          const cfg = TIER_CONFIG[sn.tier], now = new Date(), exp = new Date(now); exp.setMonth(exp.getMonth() + cfg.durationMonths);
-          await firestore().collection('subscriptions').add({ userId: sn.userId, tier: sn.tier, paymentId: event.payload.payment?.entity?.id || '', subscriptionId: s.id, startDate: Timestamp.fromDate(now), endDate: Timestamp.fromDate(exp), status: 'active', createdAt: FieldValue.serverTimestamp() });
-          await firestore().collection('users').doc(sn.userId).update({ premiumTier: sn.tier, premiumExpiry: Timestamp.fromDate(exp), subscriptionId: s.id, verifiedReal: true });
-        }
-        break;
-      }
-      case 'subscription.activated': {
-        const a = event.payload.subscription?.entity, an = a?.notes || {};
-        if (a && an.userId && an.tier && TIER_CONFIG[an.tier]) {
-          const cfg = TIER_CONFIG[an.tier], now = new Date(), exp = new Date(now); exp.setMonth(exp.getMonth() + cfg.durationMonths);
-          await firestore().collection('users').doc(an.userId).update({ premiumTier: an.tier, premiumExpiry: Timestamp.fromDate(exp), subscriptionId: a.id, verifiedReal: true });
-          await firestore().collection('subscriptions').add({ userId: an.userId, tier: an.tier, subscriptionId: a.id, startDate: Timestamp.fromDate(now), endDate: Timestamp.fromDate(exp), status: 'active', createdAt: FieldValue.serverTimestamp() });
-        }
-        break;
-      }
-      case 'subscription.cancelled': case 'subscription.expired': {
-        const c = event.payload.subscription?.entity, cn = c?.notes || {};
-        if (c && cn.userId) { await firestore().collection('users').doc(cn.userId).update({ premiumTier: 'none', premiumExpiry: null, subscriptionId: null, verifiedReal: false }); }
-        break;
-      }
-      default: console.log('Unhandled webhook event:', event.event);
+    const signature = req.headers['x-razorpay-signature'] as string;
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET || '';
+    
+    if (!verifySignature(JSON.stringify(req.body), signature, secret)) {
+      return res.status(401).json({ error: 'Invalid signature' });
     }
+    
+    const event = req.body.event;
+    const payload = req.body.payload;
+    
+    if (event === 'payment.captured') {
+      const { id, order_id, amount, email } = payload.payment.entity;
+      await Payment.create({ paymentId: id, orderId: order_id, amount: amount / 100, userEmail: email, status: 'success', paidAt: new Date() });
+    }
+    
+    if (event === 'subscription.charged' || event === 'subscription.activated') {
+      const { id, plan_id, customer_id, notes } = payload.subscription.entity;
+      const userId = notes?.userId;
+      if (userId) {
+        const tier = Object.entries(TIER_PLAN_IDS).find(([, v]) => v === plan_id)?.[0] || 'premiere';
+        const user = await User.findById(userId);
+        if (user) {
+          user.premiumTier = tier;
+          user.premiumExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+          user.verifiedReal = true;
+          user.subscriptionId = id;
+          await user.save();
+        }
+        await Subscription.create({ userId, tier, subscriptionId: id, status: event === 'subscription.charged' ? 'active' : 'active' });
+      }
+    }
+    
+    if (event === 'subscription.cancelled' || event === 'subscription.expired') {
+      const { notes, id } = payload.subscription.entity;
+      const userId = notes?.userId;
+      if (userId) {
+        await User.findByIdAndUpdate(userId, { premiumTier: 'none', premiumExpiry: null, subscriptionId: null, verifiedReal: false });
+        await Subscription.findOneAndUpdate({ subscriptionId: id }, { status: event === 'subscription.cancelled' ? 'cancelled' : 'expired' });
+      }
+    }
+    
     res.json({ status: 'ok' });
-  } catch (e: any) { console.error('Webhook error:', e); res.json({ status: 'ok' }); }
+  } catch (e: any) {
+    console.error('[Webhook] Error:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
+
+const TIER_PLAN_IDS: Record<string, string> = {
+  spotlight: 'plan_T79TclEwk342h5', marquee: 'plan_T79YHTe84YkAZt',
+  premiere: 'plan_T79Yu7hDIJWKKO', premiereElite: 'plan_T79Zlz9XoAR9lt',
+};
 
 export default router;

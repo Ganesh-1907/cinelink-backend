@@ -1,59 +1,35 @@
-import { Router, Request, Response } from 'express';
-import { firestore } from '../config/firebase';
-import { authMiddleware } from '../middleware/auth';
+import { Router, Response } from 'express';
+import User from '../models/User';
+import { authMiddleware, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 router.use(authMiddleware);
 
-router.get('/search', async (req: Request, res: Response) => {
+router.get('/search', async (req: AuthRequest, res: Response) => {
   try {
     const { query, role, limit: limitParam } = req.query;
-    const limit = Math.min(Number(limitParam) || 50, 100);
-
-    let q: FirebaseFirestore.Query = firestore().collection('users');
-
-    if (role && role !== 'All') {
-      q = q.where('role', '==', role);
+    const maxLimit = Math.min(Number(limitParam) || 50, 100);
+    const filter: any = {};
+    if (role && role !== 'All') filter.role = role;
+    if (query) {
+      filter.$or = [
+        { fullName: { $regex: query, $options: 'i' } },
+        { displayName: { $regex: query, $options: 'i' } },
+        { bio: { $regex: query, $options: 'i' } },
+        { location: { $regex: query, $options: 'i' } },
+      ];
     }
-
-    q = q.limit(limit);
-    const snapshot = await q.get();
-
-    let users = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    if (query && typeof query === 'string' && query.trim()) {
-      const searchTerm = query.toLowerCase();
-      users = users.filter((u: any) => {
-        const name = (u.fullName || u.displayName || u.name || '').toLowerCase();
-        const bio = (u.bio || '').toLowerCase();
-        const location = (u.location || '').toLowerCase();
-        return name.includes(searchTerm) || bio.includes(searchTerm) || location.includes(searchTerm);
-      });
-    }
-
+    const users = await User.find(filter).select('-password').limit(maxLimit);
     res.json({ users, total: users.length });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/suggested', async (req: Request, res: Response) => {
+router.get('/suggested', async (req: AuthRequest, res: Response) => {
   try {
-    const limit = Math.min(Number(req.query.limit) || 20, 50);
-    const snapshot = await firestore()
-      .collection('users')
-      .where('role', 'in', ['Director', 'Producer', 'Cinematographer', 'Writer'])
-      .limit(limit)
-      .get();
-
-    const users = snapshot.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter((u: any) => u.id !== req.user!.uid);
-
-    res.json({ users });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
-  }
+    const users = await User.find({ role: { $in: ['Director', 'Producer', 'Cinematographer', 'Writer'] } })
+      .select('-password').limit(20);
+    res.json({ users: users.filter(u => u._id.toString() !== req.user!.id) });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 export default router;

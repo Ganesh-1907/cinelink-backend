@@ -1,15 +1,35 @@
 import { Request, Response, NextFunction } from 'express';
-import { auth, firestore } from '../config/firebase';
+import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
-declare global { namespace Express { interface Request { user?: { uid: string; email: string; isAdmin: boolean } } } }
-export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
+
+export interface AuthRequest extends Request {
+  user?: { id: string; email?: string; role?: string; isAdmin: boolean; };
+}
+
+export function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  const token = authHeader.split(' ')[1];
   try {
-    const h = req.headers.authorization;
-    if (!h || !h.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
-    const dt = await auth().verifyIdToken(h.split('Bearer ')[1]);
-    const ud = await firestore().collection('users').doc(dt.uid).get();
-    const d = ud.data();
-    req.user = { uid: dt.uid, email: dt.email || '', isAdmin: dt.email === env.adminEmail || d?.isAdmin === true };
+    const decoded = jwt.verify(token, env.jwtSecret) as any;
+    req.user = { id: decoded.id, email: decoded.email, role: decoded.role, isAdmin: decoded.isAdmin === true };
     next();
-  } catch { return res.status(401).json({ error: 'Invalid token' }); }
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
+export function requireAdmin(req: AuthRequest, res: Response, next: NextFunction) {
+  if (!req.user?.isAdmin) return res.status(403).json({ error: 'Admin access required' });
+  next();
+}
+
+export function generateToken(user: any): string {
+  return jwt.sign(
+    { id: user._id.toString(), email: user.email, role: user.role, isAdmin: user.isAdmin },
+    env.jwtSecret,
+    { expiresIn: parseInt(env.jwtExpiresIn.replace('d', '')) * 86400 } as jwt.SignOptions
+  );
 }

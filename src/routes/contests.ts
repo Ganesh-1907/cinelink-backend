@@ -1,0 +1,10 @@
+import { Router, Response } from 'express';
+import Contest from '../models/Contest';
+import ContestEntry from '../models/ContestEntry';
+import { authMiddleware, AuthRequest } from '../middleware/auth';
+const router = Router(); router.use(authMiddleware);
+router.get('/', async (_req: AuthRequest, res: Response) => { try { const contests = await Contest.find().sort({ createdAt: -1 }).limit(50); res.json({ contests }); } catch (e: any) { res.status(500).json({ error: e.message }); }});
+router.get('/:id', async (req: AuthRequest, res: Response) => { try { const c = await Contest.findById(req.params.id); if (!c) return res.status(404).json({ error: '' }); res.json({ contest: c }); } catch (e: any) { res.status(500).json({ error: e.message }); }});
+router.post('/', async (req: AuthRequest, res: Response) => { try { const c = await Contest.create({ ...req.body, createdBy: req.user!.id }); res.status(201).json({ contest: c }); } catch (e: any) { res.status(500).json({ error: e.message }); }});
+router.post('/:id/enter', async (req: AuthRequest, res: Response) => { try { const entry = await ContestEntry.create({ contestId: req.params.id, ...req.body, userId: req.user!.id }); await Contest.findByIdAndUpdate(req.params.id, { $inc: { entriesCount: 1 } }); res.status(201).json({ entry }); } catch (e: any) { res.status(500).json({ error: e.message }); }});
+export default router;
