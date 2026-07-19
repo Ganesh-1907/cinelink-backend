@@ -1,13 +1,23 @@
-import { env } from '../config/env';
+import admin from 'firebase-admin';
+import User from '../models/User';
 
-// Direct FCM HTTP v1 API without Firebase Admin SDK
-// Uses the Firebase Cloud Messaging REST API
+// Initialize Firebase Admin if not already initialized
+if (!admin.apps.length) {
+  try {
+    const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_PATH
+      ? require(process.env.FIREBASE_SERVICE_ACCOUNT_PATH)
+      : undefined;
 
-const FCM_URL = 'https://fcm.googleapis.com/fcm/send';
-// For FCM without Admin SDK, we need the server key from Firebase Cloud Messaging
-// This is a simplified version - in production use firebase-admin's FCM or the v1 API
-
-const FCM_SERVER_KEY = process.env.FCM_SERVER_KEY || '';
+    if (serviceAccount) {
+      admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+    } else {
+      // Try default credentials (works on some hosting platforms)
+      admin.initializeApp();
+    }
+  } catch {
+    console.warn('[Push] Firebase Admin not configured — push notifications disabled');
+  }
+}
 
 export async function sendPushNotification(
   userId: string,
@@ -15,14 +25,29 @@ export async function sendPushNotification(
   body: string,
   data?: Record<string, string>
 ): Promise<boolean> {
-  if (!FCM_SERVER_KEY) return false;
-  
   try {
-    // In a real implementation, fetch the user's FCM token from User model
-    // For now, this is a placeholder
+    const user = await User.findById(userId);
+    if (!user?.fcmToken) return false;
+
+    if (!admin.apps.length || !admin.messaging) return false;
+
+    const message: admin.messaging.Message = {
+      token: user.fcmToken,
+      notification: { title, body },
+      data: data || {},
+      android: { priority: 'high' },
+      apns: { payload: { aps: { sound: 'default', badge: 1 } } },
+    };
+
+    await admin.messaging().send(message);
     return true;
-  } catch (e) {
-    console.error('[Push] Failed:', e);
+  } catch (e: any) {
+    console.error('[Push] Failed:', e.message);
+    // If token is invalid/unregistered, clear it
+    if (e.code === 'messaging/invalid-registration-token' ||
+        e.code === 'messaging/registration-token-not-registered') {
+      await User.findByIdAndUpdate(userId, { fcmToken: '' });
+    }
     return false;
   }
 }

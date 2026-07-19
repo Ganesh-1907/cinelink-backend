@@ -73,6 +73,23 @@ router.post('/:chatId/messages', async (req: AuthRequest, res: Response) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+router.put('/:chatId/read', async (req: AuthRequest, res: Response) => {
+  try {
+    await Message.updateMany(
+      { chatId: req.params.chatId, senderId: { $ne: req.user!.id }, readBy: { $ne: req.user!.id } },
+      { $addToSet: { readBy: req.user!.id } }
+    );
+    const chat = await Chat.findById(req.params.chatId);
+    if (chat) {
+      const u = { ...chat.unreadCount };
+      u[req.user!.id!] = 0;
+      chat.unreadCount = u;
+      await chat.save();
+    }
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 router.delete('/:chatId/messages/:messageId', async (req: AuthRequest, res: Response) => {
   try {
     const msg = await Message.findById(req.params.messageId);

@@ -136,6 +136,33 @@ router.post('/verify-otp', async (req: Request, res: Response) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Logout ──
+router.post('/logout', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (authHeader) {
+      const token = authHeader.split(' ')[1];
+      const decoded = require('jsonwebtoken').verify(token, env.jwtSecret);
+      await User.findByIdAndUpdate(decoded.id, { isOnline: false, lastSeen: new Date() });
+    }
+    res.json({ success: true });
+  } catch { res.json({ success: true }); }
+});
+
+// ── Refresh token ──
+router.post('/refresh-token', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'Auth required' });
+    const token = authHeader.split(' ')[1];
+    const decoded = require('jsonwebtoken').verify(token, env.jwtSecret);
+    const user = await User.findById(decoded.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const newToken = generateToken(user);
+    res.json({ token: newToken });
+  } catch (e: any) { res.status(401).json({ error: 'Invalid token' }); }
+});
+
 // ── Get current user profile ──
 router.get('/me', async (req: Request, res: Response) => {
   try {

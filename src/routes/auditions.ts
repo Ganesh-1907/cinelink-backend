@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import Audition from '../models/Audition';
 import User from '../models/User';
+import Comment from '../models/Comment';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -24,7 +25,11 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
 
 router.post('/', async (req: AuthRequest, res: Response) => {
   try {
-    const audition = await Audition.create({ ...req.body, postedById: req.user!.id, directorId: req.user!.id });
+    const { language, ...rest } = req.body;
+    const auditionData = { ...rest, postedById: req.user!.id, directorId: req.user!.id };
+    if (language) auditionData.lang = language;
+    if (rest.lang) auditionData.lang = rest.lang;
+    const audition = await Audition.create(auditionData);
     res.status(201).json({ audition });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
@@ -41,11 +46,49 @@ router.post('/:id/like', async (req: AuthRequest, res: Response) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+router.put('/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const audition = await Audition.findById(req.params.id);
+    if (!audition) return res.status(404).json({ error: 'Not found' });
+    if (audition.postedById !== req.user!.id && !req.user!.isAdmin) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+    const { language, ...rest } = req.body;
+    const updateData = { ...rest };
+    if (language) updateData.lang = language;
+    const updated = await Audition.findByIdAndUpdate(req.params.id, updateData, { new: true });
+    res.json({ audition: updated });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const audition = await Audition.findById(req.params.id);
+    if (!audition) return res.status(404).json({ error: 'Not found' });
+    if (audition.postedById !== req.user!.id && !req.user!.isAdmin) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+    await Audition.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 router.post('/:id/comment', async (req: AuthRequest, res: Response) => {
   try {
-    const audition = await Audition.findByIdAndUpdate(req.params.id, { $inc: { commentsCount: 1 } });
+    const audition = await Audition.findById(req.params.id);
     if (!audition) return res.status(404).json({ error: 'Not found' });
-    res.json({ success: true });
+    const user = await User.findById(req.user!.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const comment = await Comment.create({
+      targetId: req.params.id,
+      targetType: 'audition',
+      userId: req.user!.id,
+      userName: user.fullName || user.email || 'Unknown',
+      userAvatar: user.photoUrl || user.photoURL || '',
+      text: req.body.text,
+    });
+    await Audition.findByIdAndUpdate(req.params.id, { $inc: { commentsCount: 1 } });
+    res.status(201).json({ comment });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
