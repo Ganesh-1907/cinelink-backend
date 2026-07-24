@@ -5,6 +5,7 @@ import Notification from '../models/Notification';
 import Audition from '../models/Audition';
 import BannedUser from '../models/BannedUser';
 import VerificationRequest from '../models/VerificationRequest';
+import CastingRequest from '../models/CastingRequest';
 import { authMiddleware, requireAdmin, AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -45,8 +46,12 @@ router.put('/reports/:reportId', async (req: AuthRequest, res: Response) => {
 router.get('/users', async (req: AuthRequest, res: Response) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 50, 100);
-    const users = await User.find().select('-password').sort({ createdAt: -1 }).limit(limit);
-    res.json({ users });
+    const users = await User.find().select('-password').sort({ createdAt: -1 }).limit(limit).lean();
+    // Add ban status to each user
+    const bannedUsers = await BannedUser.find({ userId: { $in: users.map((u: any) => u._id.toString()) } }).lean();
+    const bannedSet = new Set(bannedUsers.map((b: any) => b.userId));
+    const usersWithBan = users.map((u: any) => ({ ...u, banned: bannedSet.has(u._id.toString()) }));
+    res.json({ users: usersWithBan });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -118,6 +123,51 @@ router.put('/verification-requests/:id', async (req: AuthRequest, res: Response)
     });
 
     res.json({ request: vr });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Casting Director Requests ──
+router.get('/casting-requests', async (_req: AuthRequest, res: Response) => {
+  try {
+    const requests = await CastingRequest.find().sort({ createdAt: -1 });
+    res.json({ requests });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/casting-requests/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const { status } = req.body;
+    if (!['approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Status must be approved or rejected' });
+    }
+    const cr = await CastingRequest.findByIdAndUpdate(
+      req.params.id,
+      { status, reviewedBy: req.user!.id, reviewedAt: new Date() },
+      { new: true }
+    );
+    if (!cr) return res.status(404).json({ error: 'Casting request not found' });
+
+    if (status === 'approved') {
+      await User.findByIdAndUpdate(cr.userId, {
+        isApprovedDirector: true,
+        role: 'Director',
+      });
+      await Notification.create({
+        userId: cr.userId,
+        type: 'casting_approved',
+        title: '🎬 Casting Director Approved!',
+        message: 'Your casting director application has been approved. You can now post auditions!',
+      });
+    } else {
+      await Notification.create({
+        userId: cr.userId,
+        type: 'casting_rejected',
+        title: 'Casting Director Rejected',
+        message: 'Your casting director application was not approved. You can submit a new application.',
+      });
+    }
+
+    res.json({ request: cr });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

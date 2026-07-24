@@ -9,9 +9,21 @@ import Notification from '../models/Notification';
 const router = Router();
 router.use(authMiddleware);
 
-router.get('/', async (_req: AuthRequest, res: Response) => {
+router.get('/', async (req: AuthRequest, res: Response) => {
   try {
-    const contests = await Contest.find().sort({ createdAt: -1 }).limit(50);
+    const filter: any = {};
+    if (req.query.createdBy) filter.createdBy = req.query.createdBy;
+    const contests = await Contest.find(filter).sort({ createdAt: -1 }).limit(50);
+    res.json({ contests });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Get contests entered by current user (BEFORE /:id to avoid route conflict) ──
+router.get('/user/entered', async (req: AuthRequest, res: Response) => {
+  try {
+    const entries = await ContestEntry.find({ userId: req.user!.id }).select('contestId');
+    const contestIds = entries.map(e => e.contestId);
+    const contests = await Contest.find({ _id: { $in: contestIds } }).sort({ createdAt: -1 });
     res.json({ contests });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import User from '../models/User';
 import BannedUser from '../models/BannedUser';
+import CastingRequest from '../models/CastingRequest';
 import Follow from '../models/Follow';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import Notification from '../models/Notification';
@@ -23,7 +24,8 @@ router.put('/profile', async (req: AuthRequest, res: Response) => {
       'fullName','displayName','name','bio','role','location',
       'photoUrl','photoURL','introVideoLink','portfolio1','portfolio2','portfolio3',
       'portfolioPhotos','portfolioMedia','availabilityStatus','lookingFor','profileTags',
-      'instagramLink','youtubeLink','ageRange','height','bodyType'
+      'instagramLink','youtubeLink','ageRange','height','bodyType',
+      'notificationsEnabled','emailNotifications','profileVisible'
     ];
     const updates: any = {};
     for (const field of allowedFields) {
@@ -145,6 +147,75 @@ router.get('/check-ban', async (req: AuthRequest, res: Response) => {
   try {
     const ban = await BannedUser.findOne({ userId: req.user!.id });
     res.json({ banned: !!ban });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Submit casting director request ──
+router.post('/casting-request', async (req: AuthRequest, res: Response) => {
+  try {
+    const {
+      companyName, yearsExperience, message, experience,
+      portfolio, idType, idProofUrl, companyDocUrl, phone, phoneVerified,
+    } = req.body;
+
+    const user = await User.findById(req.user!.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const cr = await CastingRequest.create({
+      userId: user._id.toString(),
+      userEmail: user.email,
+      userName: user.fullName || user.displayName || user.email,
+      role: user.role || 'Director',
+      bio: user.bio || '',
+      companyName,
+      yearsExperience,
+      message,
+      experience,
+      portfolio,
+      idType,
+      idProofUrl,
+      companyDocUrl: companyDocUrl || '',
+      phone,
+      phoneVerified,
+      status: 'pending',
+    });
+
+    const admins = await User.find({ isAdmin: true });
+    for (const admin of admins) {
+      await Notification.create({
+        userId: admin._id.toString(),
+        type: 'casting_request',
+        title: '📋 New Casting Director Request!',
+        message: `${user.fullName || user.email} (${companyName}) wants to post auditions.`,
+        senderId: user._id.toString(),
+      });
+    }
+
+    res.status(201).json({ request: cr });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Check existing casting request status ──
+router.get('/casting-request-status', async (req: AuthRequest, res: Response) => {
+  try {
+    const cr = await CastingRequest.findOne({ userId: req.user!.id }).sort({ createdAt: -1 });
+    res.json({ request: cr, status: cr?.status || null });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Delete account ──
+router.delete('/account', async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user!.id;
+
+    await Promise.all([
+      Follow.deleteMany({ $or: [{ followerId: userId }, { followingId: userId }] }),
+      Notification.deleteMany({ $or: [{ userId }, { senderId: userId }] }),
+      CastingRequest.deleteMany({ userId }),
+    ]);
+
+    await User.findByIdAndDelete(userId);
+    res.json({ success: true, message: 'Account deleted.' });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

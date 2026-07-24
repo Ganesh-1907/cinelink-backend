@@ -83,6 +83,15 @@ app.use('/api/webhooks', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Request Logger
+app.use((req, _res, next) => {
+  console.log(`[${new Date().toLocaleTimeString()}] 🚀 ${req.method} ${req.originalUrl}`);
+  if (req.method !== 'GET' && req.body && Object.keys(req.body).length > 0) {
+    console.log('📦 Body:', JSON.stringify(req.body, null, 2));
+  }
+  next();
+});
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/payments', paymentRoutes);
