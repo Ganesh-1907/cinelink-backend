@@ -14,7 +14,15 @@ router.get('/profile', async (req: AuthRequest, res: Response) => {
   try {
     const user = await User.findById(req.user!.id).select('-password');
     if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json({ user });
+    const followerCount = await Follow.countDocuments({ followingId: req.user!.id });
+    const followingCount = await Follow.countDocuments({ followerId: req.user!.id });
+    res.json({
+      user: {
+        ...user.toObject(),
+        followerCount,
+        followingCount,
+      }
+    });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -59,7 +67,15 @@ router.get('/:userId', async (req: AuthRequest, res: Response) => {
   try {
     const user = await User.findById(req.params.userId).select('-password -email -phone -fcmToken');
     if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json({ user });
+    const followerCount = await Follow.countDocuments({ followingId: req.params.userId });
+    const followingCount = await Follow.countDocuments({ followerId: req.params.userId });
+    res.json({
+      user: {
+        ...user.toObject(),
+        followerCount,
+        followingCount,
+      }
+    });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
