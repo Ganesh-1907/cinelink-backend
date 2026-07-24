@@ -3,6 +3,7 @@ import User from '../models/User';
 import BannedUser from '../models/BannedUser';
 import CastingRequest from '../models/CastingRequest';
 import Follow from '../models/Follow';
+import Application from '../models/Application';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import Notification from '../models/Notification';
 import { sendPushNotification } from '../services/pushService';
@@ -16,11 +17,13 @@ router.get('/profile', async (req: AuthRequest, res: Response) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
     const followerCount = await Follow.countDocuments({ followingId: req.user!.id });
     const followingCount = await Follow.countDocuments({ followerId: req.user!.id });
+    const applicationsCount = await Application.countDocuments({ userId: req.user!.id });
     res.json({
       user: {
         ...user.toObject(),
         followerCount,
         followingCount,
+        applicationsCount,
       }
     });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -69,11 +72,13 @@ router.get('/:userId', async (req: AuthRequest, res: Response) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
     const followerCount = await Follow.countDocuments({ followingId: req.params.userId });
     const followingCount = await Follow.countDocuments({ followerId: req.params.userId });
+    const applicationsCount = await Application.countDocuments({ userId: req.params.userId });
     res.json({
       user: {
         ...user.toObject(),
         followerCount,
         followingCount,
+        applicationsCount,
       }
     });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
