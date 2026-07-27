@@ -3,7 +3,9 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface IContest extends Document {
   title: string; description?: string; prize?: string; entryFee?: number;
   deadline?: string; posterUrl?: string; createdBy: string;
-  entriesCount: number; status: string; createdAt: Date; updatedAt: Date;
+  entriesCount: number; status: string; isPrivate?: boolean;
+  type?: string; rules?: string;
+  createdAt: Date; updatedAt: Date;
 }
 
 const ContestSchema = new Schema<IContest>({
@@ -14,6 +16,9 @@ const ContestSchema = new Schema<IContest>({
   createdBy: { type: String, required: true, index: true },
   entriesCount: { type: Number, default: 0 },
   status: { type: String, default: 'active', enum: ['active','closed','cancelled'] },
+  isPrivate: { type: Boolean, default: false },
+  type: { type: String, default: 'Short Film' },
+  rules: { type: String, default: '' },
 }, { timestamps: true });
 
 ContestSchema.index({ createdAt: -1 });

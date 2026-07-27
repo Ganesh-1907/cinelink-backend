@@ -2,7 +2,18 @@ import { Router, Response } from 'express';
 import Film from '../models/Film';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 const router = Router(); router.use(authMiddleware);
-router.get('/', async (_req: AuthRequest, res: Response) => { try { const films = await Film.find().sort({ createdAt: -1 }).limit(50); res.json({ films }); } catch (e: any) { res.status(500).json({ error: e.message }); }});
+router.get('/', async (req: AuthRequest, res: Response) => {
+  try {
+    const filter = {
+      $or: [
+        { isPrivate: { $ne: true } },
+        { userId: req.user!.id },
+      ],
+    };
+    const films = await Film.find(filter).sort({ createdAt: -1 }).limit(50);
+    res.json({ films });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
 router.get('/:id', async (req: AuthRequest, res: Response) => { try { const film = await Film.findById(req.params.id); if (!film) return res.status(404).json({ error: 'Not found' }); res.json({ film }); } catch (e: any) { res.status(500).json({ error: e.message }); }});
 router.post('/', async (req: AuthRequest, res: Response) => { try { const film = await Film.create({ ...req.body, userId: req.user!.id }); res.status(201).json({ film }); } catch (e: any) { res.status(500).json({ error: e.message }); }});
 router.post('/:id/like', async (req: AuthRequest, res: Response) => { try { const f = await Film.findById(req.params.id); if (!f) return res.status(404).json({ error: '' }); const idx = f.likedBy.indexOf(req.user!.id); if (idx > -1) { f.likedBy.splice(idx, 1); f.likes = Math.max(0, f.likes - 1); } else { f.likedBy.push(req.user!.id); f.likes += 1; } await f.save(); res.json({ likes: f.likes, liked: idx === -1 }); } catch (e: any) { res.status(500).json({ error: e.message }); }});

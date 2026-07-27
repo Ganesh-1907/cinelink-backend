@@ -7,9 +7,15 @@ import { authMiddleware, AuthRequest } from '../middleware/auth';
 const router = Router();
 router.use(authMiddleware);
 
-router.get('/', async (_req: AuthRequest, res: Response) => {
+router.get('/', async (req: AuthRequest, res: Response) => {
   try {
-    const auditions = await Audition.find().sort({ createdAt: -1 }).limit(50);
+    const filter = {
+      $or: [
+        { isPrivate: { $ne: true } },
+        { postedById: req.user!.id },
+      ],
+    };
+    const auditions = await Audition.find(filter).sort({ createdAt: -1 }).limit(50);
     res.json({ auditions });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

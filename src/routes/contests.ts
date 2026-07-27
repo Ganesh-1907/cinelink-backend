@@ -12,7 +12,14 @@ router.use(authMiddleware);
 router.get('/', async (req: AuthRequest, res: Response) => {
   try {
     const filter: any = {};
-    if (req.query.createdBy) filter.createdBy = req.query.createdBy;
+    if (req.query.createdBy) {
+      filter.createdBy = req.query.createdBy;
+    } else {
+      filter.$or = [
+        { isPrivate: { $ne: true } },
+        { createdBy: req.user!.id },
+      ];
+    }
     const contests = await Contest.find(filter).sort({ createdAt: -1 }).limit(50);
     res.json({ contests });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -84,6 +91,30 @@ router.get('/:id/entries', async (req: AuthRequest, res: Response) => {
     const entries = await ContestEntry.find({ contestId: req.params.id })
       .sort({ votes: -1, createdAt: -1 });
     res.json({ entries });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const contest = await Contest.findById(req.params.id);
+    if (!contest) return res.status(404).json({ error: 'Contest not found' });
+    if (contest.createdBy !== req.user!.id && !req.user!.isAdmin) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+    const updated = await Contest.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    res.json({ contest: updated });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const contest = await Contest.findById(req.params.id);
+    if (!contest) return res.status(404).json({ error: 'Contest not found' });
+    if (contest.createdBy !== req.user!.id && !req.user!.isAdmin) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+    await Contest.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

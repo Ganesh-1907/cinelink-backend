@@ -7,6 +7,7 @@ export interface IAudition extends Document {
   budget?: string; positions?: string; directorId: string; directorName?: string;
   postedById: string; likes: number; likedBy: string[]; views: number;
   commentsCount: number; applicationsCount: number;
+  isPrivate?: boolean;
   createdAt: Date; updatedAt: Date;
 }
 
@@ -24,6 +25,7 @@ const AuditionSchema = new Schema<IAudition>({
   likes: { type: Number, default: 0 }, likedBy: [{ type: String }],
   views: { type: Number, default: 0 }, commentsCount: { type: Number, default: 0 },
   applicationsCount: { type: Number, default: 0 },
+  isPrivate: { type: Boolean, default: false },
 }, { timestamps: true });
 
 AuditionSchema.index({ createdAt: -1 }); AuditionSchema.index({ directorId: 1 });
