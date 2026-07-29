@@ -4,7 +4,7 @@ import { OAuth2Client } from 'google-auth-library';
 import User from '../models/User';
 import { env } from '../config/env';
 import { generateToken } from '../middleware/auth';
-import { sendOTPEmail, sendWelcomeEmail, sendPasswordResetEmail } from '../services/emailService';
+import { sendOTPEmail, sendWelcomeEmail, sendPasswordResetEmail, sendResetOTPEmail } from '../services/emailService';
 
 const router = Router();
 const googleClient = new OAuth2Client(env.google.clientId);
@@ -15,6 +15,11 @@ router.post('/signup', async (req: Request, res: Response) => {
     const { email, password, fullName } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
     
+    const isVerified = (global as any).__verifiedSignupEmails?.[email.toLowerCase()];
+    if (!isVerified || Date.now() > isVerified) {
+      return res.status(400).json({ error: 'Please verify your email via OTP first' });
+    }
+
     const existing = await User.findOne({ email: email.toLowerCase() });
     if (existing) return res.status(409).json({ error: 'Email already registered' });
     
@@ -27,10 +32,52 @@ router.post('/signup', async (req: Request, res: Response) => {
       isOnline: true, lastSeen: new Date(),
     });
     
+    if ((global as any).__verifiedSignupEmails) {
+      delete (global as any).__verifiedSignupEmails[email.toLowerCase()];
+    }
+
     const token = generateToken(user);
     sendWelcomeEmail(user.email!, user.fullName!).catch(() => {});
     
     res.status(201).json({ token, user: { id: user._id, email: user.email, fullName: user.fullName, role: user.role } });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Send Signup Verification OTP ──
+router.post('/send-signup-otp', async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email required' });
+    
+    const existing = await User.findOne({ email: email.toLowerCase() });
+    if (existing) return res.status(400).json({ error: 'Email already registered' });
+    
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    (global as any).__otps = (global as any).__otps || {};
+    (global as any).__otps[email.toLowerCase()] = { otp, expiresAt: Date.now() + 5 * 60 * 1000 };
+    
+    await sendOTPEmail(email, otp);
+    res.json({ success: true, message: 'Verification OTP sent to your email' });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Verify Signup OTP ──
+router.post('/verify-signup-otp', async (req: Request, res: Response) => {
+  try {
+    const { email, otp } = req.body;
+    if (!email || !otp) return res.status(400).json({ error: 'Email and OTP required' });
+    
+    const stored = (global as any).__otps?.[email.toLowerCase()];
+    if (!stored) return res.status(400).json({ error: 'No OTP sent to this email' });
+    if (Date.now() > stored.expiresAt) return res.status(400).json({ error: 'OTP expired' });
+    if (stored.otp !== otp) return res.status(400).json({ error: 'Invalid OTP' });
+    
+    delete (global as any).__otps[email.toLowerCase()];
+    
+    (global as any).__verifiedSignupEmails = (global as any).__verifiedSignupEmails || {};
+    (global as any).__verifiedSignupEmails[email.toLowerCase()] = Date.now() + 15 * 60 * 1000;
+    
+    res.json({ success: true, message: 'Email verified successfully' });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -196,6 +243,49 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
 
     await sendPasswordResetEmail(user.email!, resetToken, user.fullName || user.displayName);
     res.json({ success: true, message: 'Password reset email sent.' });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Send Password Reset OTP ──
+router.post('/send-reset-otp', async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email required' });
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) return res.status(404).json({ error: 'No account found with this email' });
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    (global as any).__resetOtps = (global as any).__resetOtps || {};
+    (global as any).__resetOtps[email.toLowerCase()] = { otp, expiresAt: Date.now() + 5 * 60 * 1000 };
+
+    await sendResetOTPEmail(email, otp, user.fullName);
+    res.json({ success: true, message: 'Password reset OTP sent to email' });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Verify Password Reset OTP and Update Password ──
+router.post('/verify-reset-otp', async (req: Request, res: Response) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+    if (!email || !otp || !newPassword) return res.status(400).json({ error: 'Email, OTP and new password required' });
+    if (newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+
+    const stored = (global as any).__resetOtps?.[email.toLowerCase()];
+    if (!stored) return res.status(400).json({ error: 'No reset OTP sent to this email' });
+    if (Date.now() > stored.expiresAt) return res.status(400).json({ error: 'OTP expired' });
+    if (stored.otp !== otp) return res.status(400).json({ error: 'Invalid OTP' });
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+    user.password = hashedPassword;
+    await user.save();
+
+    delete (global as any).__resetOtps[email.toLowerCase()];
+
+    res.json({ success: true, message: 'Password reset successfully' });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
