@@ -53,4 +53,14 @@ router.get('/pending', async (req: AuthRequest, res: Response) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+router.get('/all', async (req: AuthRequest, res: Response) => {
+  try {
+    const list = await Connection.find({
+      $or: [{ requesterId: req.user!.id }, { targetId: req.user!.id }]
+    });
+    res.json({ connections: list });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;
+

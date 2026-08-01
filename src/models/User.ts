@@ -18,6 +18,9 @@ export interface IUser extends Document {
   isOnline: boolean; lastSeen?: Date; likedReels: string[];
   googleId?: string; refreshToken?: string;
   notificationsEnabled: boolean; emailNotifications: boolean; profileVisible: boolean;
+  profileLikes?: number;
+  profileLikedBy?: string[];
+  profileViews?: number;
   createdAt: Date; updatedAt: Date;
 }
 
@@ -62,6 +65,9 @@ const UserSchema = new Schema<IUser>({
   notificationsEnabled: { type: Boolean, default: true },
   emailNotifications: { type: Boolean, default: true },
   profileVisible: { type: Boolean, default: true },
+  profileLikes: { type: Number, default: 0 },
+  profileLikedBy: [{ type: String }],
+  profileViews: { type: Number, default: 0 },
   googleId: { type: String },
   refreshToken: { type: String },
 }, { timestamps: true });

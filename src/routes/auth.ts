@@ -56,7 +56,9 @@ router.post('/send-signup-otp', async (req: Request, res: Response) => {
     (global as any).__otps = (global as any).__otps || {};
     (global as any).__otps[email.toLowerCase()] = { otp, expiresAt: Date.now() + 5 * 60 * 1000 };
     
-    await sendOTPEmail(email, otp);
+    sendOTPEmail(email, otp).catch(err => {
+      console.error('Failed to send signup OTP email in background:', err);
+    });
     res.json({ success: true, message: 'Verification OTP sent to your email' });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
@@ -259,8 +261,25 @@ router.post('/send-reset-otp', async (req: Request, res: Response) => {
     (global as any).__resetOtps = (global as any).__resetOtps || {};
     (global as any).__resetOtps[email.toLowerCase()] = { otp, expiresAt: Date.now() + 5 * 60 * 1000 };
 
-    await sendResetOTPEmail(email, otp, user.fullName);
+    sendResetOTPEmail(email, otp, user.fullName).catch(err => {
+      console.error('Failed to send reset OTP email in background:', err);
+    });
     res.json({ success: true, message: 'Password reset OTP sent to email' });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Validate Password Reset OTP ──
+router.post('/validate-reset-otp', async (req: Request, res: Response) => {
+  try {
+    const { email, otp } = req.body;
+    if (!email || !otp) return res.status(400).json({ error: 'Email and OTP required' });
+
+    const stored = (global as any).__resetOtps?.[email.toLowerCase()];
+    if (!stored) return res.status(400).json({ error: 'No reset OTP sent to this email' });
+    if (Date.now() > stored.expiresAt) return res.status(400).json({ error: 'OTP expired' });
+    if (stored.otp !== otp) return res.status(400).json({ error: 'Invalid OTP' });
+
+    res.json({ success: true, message: 'OTP is valid' });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

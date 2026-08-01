@@ -31,6 +31,24 @@ router.get('/profile', async (req: AuthRequest, res: Response) => {
 
 router.put('/profile', async (req: AuthRequest, res: Response) => {
   try {
+    const currentUser = await User.findById(req.user!.id);
+    if (!currentUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (req.body.role !== undefined && req.body.role !== currentUser.role) {
+      const currentRoleLower = (currentUser.role || '').toLowerCase();
+      const newRoleLower = (req.body.role || '').toLowerCase();
+
+      if (currentRoleLower === 'admin' || currentRoleLower === 'director') {
+        return res.status(403).json({ error: 'Admin or Director roles cannot be changed directly.' });
+      }
+
+      if (newRoleLower === 'admin' || newRoleLower === 'director') {
+        return res.status(403).json({ error: 'Cannot select Admin or Director role directly. Please request via admin.' });
+      }
+    }
+
     const allowedFields = [
       'fullName','displayName','name','bio','role','location',
       'photoUrl','photoURL','introVideoLink','portfolio1','portfolio2','portfolio3',
@@ -48,9 +66,18 @@ router.put('/profile', async (req: AuthRequest, res: Response) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+router.get('/following-ids', async (req: AuthRequest, res: Response) => {
+  try {
+    const list = await Follow.find({ followerId: req.user!.id });
+    res.json({ followingIds: list.map(f => f.followingId) });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/search', async (req: AuthRequest, res: Response) => {
   try {
-    const { query, role, limit } = req.query;
+    const { query, role } = req.query;
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(100, parseInt(req.query.limit as string) || 10);
     const filter: any = {};
     if (role && role !== 'All') filter.role = role;
     if (query) {
@@ -61,8 +88,12 @@ router.get('/search', async (req: AuthRequest, res: Response) => {
         { location: { $regex: query, $options: 'i' } },
       ];
     }
-    const users = await User.find(filter).select('-password').limit(Math.min(Number(limit) || 50, 100));
-    res.json({ users });
+    const users = await User.find(filter)
+      .select('-password')
+      .skip((page - 1) * limit)
+      .limit(limit);
+    const total = await User.countDocuments(filter);
+    res.json({ users, total, page, hasMore: page * limit < total });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -237,6 +268,48 @@ router.delete('/account', async (req: AuthRequest, res: Response) => {
 
     await User.findByIdAndDelete(userId);
     res.json({ success: true, message: 'Account deleted.' });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Like user profile ──
+router.post('/:userId/like', async (req: AuthRequest, res: Response) => {
+  try {
+    const targetUserId = req.params.userId;
+    const targetUser = await User.findById(targetUserId);
+    if (!targetUser) return res.status(404).json({ error: 'User not found' });
+
+    if (!targetUser.profileLikedBy) {
+      targetUser.profileLikedBy = [];
+    }
+
+    const idx = targetUser.profileLikedBy.indexOf(req.user!.id);
+    let liked = false;
+    if (idx > -1) {
+      targetUser.profileLikedBy.splice(idx, 1);
+      targetUser.profileLikes = Math.max(0, (targetUser.profileLikes || 1) - 1);
+      liked = false;
+    } else {
+      targetUser.profileLikedBy.push(req.user!.id);
+      targetUser.profileLikes = (targetUser.profileLikes || 0) + 1;
+      liked = true;
+    }
+
+    await targetUser.save();
+    res.json({ likes: targetUser.profileLikes, liked });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Track profile view ──
+router.post('/:userId/view', async (req: AuthRequest, res: Response) => {
+  try {
+    const targetUserId = req.params.userId;
+    const targetUser = await User.findByIdAndUpdate(
+      targetUserId,
+      { $inc: { profileViews: 1 } },
+      { new: true }
+    );
+    if (!targetUser) return res.status(404).json({ error: 'User not found' });
+    res.json({ success: true, views: targetUser.profileViews });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

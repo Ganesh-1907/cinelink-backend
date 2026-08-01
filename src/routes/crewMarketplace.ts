@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import Crew from '../models/Crew';
+import User from '../models/User';
 
 const router = Router();
 router.use(authMiddleware);
@@ -19,7 +20,18 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       ];
     }
     const posts = await Crew.find(filter).sort({ createdAt: -1 }).limit(50);
-    res.json({ posts });
+    
+    // Populate user profile info manually
+    const userIds = posts.map(p => p.userId);
+    const users = await User.find({ _id: { $in: userIds } }).select('fullName displayName photoUrl role');
+    const userMap = new Map(users.map(u => [u.id, u]));
+    
+    const populated = posts.map(p => ({
+      ...p.toObject(),
+      creator: userMap.get(p.userId) || null
+    }));
+
+    res.json({ posts: populated });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

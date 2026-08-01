@@ -2,10 +2,59 @@ import { Router, Response } from 'express';
 import Chat from '../models/Chat';
 import Message from '../models/Message';
 import Notification from '../models/Notification';
+import Project from '../models/Project';
+import User from '../models/User';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 router.use(authMiddleware);
+
+router.post('/project-chat/:projectId', async (req: AuthRequest, res: Response) => {
+  try {
+    const { projectId } = req.params;
+    const project = await Project.findById(projectId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    
+    const isCreator = project.createdBy === req.user!.id;
+    const isMember = project.members.includes(req.user!.id);
+    if (!isCreator && !isMember) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+    
+    let chat = await Chat.findOne({ projectId, isGroupChat: true });
+    
+    const allMemberIds = Array.from(new Set([project.createdBy, ...project.members]));
+    const users = await User.find({ _id: { $in: allMemberIds } }).select('fullName displayName email');
+    const participantNames = users.map(u => u.fullName || u.displayName || u.email?.split('@')[0] || 'Member');
+    
+    if (!chat) {
+      chat = await Chat.create({
+        participants: allMemberIds,
+        participantNames,
+        isGroupChat: true,
+        projectId,
+        groupName: project.title,
+        lastMessage: 'Group created',
+        lastMessageTime: new Date()
+      });
+    } else {
+      let changed = false;
+      for (const mId of allMemberIds) {
+        if (!chat.participants.includes(mId)) {
+          chat.participants.push(mId);
+          changed = true;
+        }
+      }
+      if (changed) {
+        chat.participantNames = participantNames;
+        await chat.save();
+      }
+    }
+    
+    res.json({ success: true, chatId: chat._id, chat });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 
 router.post('/start', async (req: AuthRequest, res: Response) => {
   try {
