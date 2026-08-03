@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IChat extends Document {
+  chatId?: string;
   participants: string[]; participantNames: string[];
   lastMessage?: string; lastMessageTime?: Date;
   unreadCount: Record<string, number>;
@@ -12,6 +13,7 @@ export interface IChat extends Document {
 }
 
 const ChatSchema = new Schema<IChat>({
+  chatId: { type: String, index: true, sparse: true },
   participants: [{ type: String, required: true }],
   participantNames: [{ type: String }],
   lastMessage: { type: String, default: '' },

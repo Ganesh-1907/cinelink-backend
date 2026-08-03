@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import http from 'http';
+import jwt from 'jsonwebtoken';
 import { Server as SocketIOServer } from 'socket.io';
 import { env } from './config/env';
 import { connectDB } from './config/db';
@@ -36,8 +37,21 @@ const io = new SocketIOServer(server, {
 // ── Socket.IO real-time ──
 const onlineUsers = new Map<string, string>(); // userId -> socketId
 
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token || socket.handshake.query?.token as string;
+  if (!token) return next(new Error('Authentication required'));
+  try {
+    const decoded = jwt.verify(token, env.jwtSecret) as any;
+    (socket as any).userId = decoded.id;
+    (socket as any).userEmail = decoded.email;
+    next();
+  } catch {
+    next(new Error('Invalid token'));
+  }
+});
+
 io.on('connection', (socket) => {
-  const userId = socket.handshake.query.userId as string;
+  const userId = (socket as any).userId as string;
   if (userId) {
     onlineUsers.set(userId, socket.id);
     io.emit('user:online', { userId, online: true });
