@@ -8,6 +8,7 @@ export interface IFeedPost extends Document {
   likedBy: string[];
   comments: number;
   postType: string;
+  imageOffset?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -20,6 +21,7 @@ const FeedPostSchema = new Schema<IFeedPost>({
   likedBy: [{ type: String }],
   comments: { type: Number, default: 0 },
   postType: { type: String, default: 'text' },
+  imageOffset: { type: Number, default: 0 },
 }, { timestamps: true });
 
 FeedPostSchema.index({ createdAt: -1 });

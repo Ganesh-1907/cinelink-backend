@@ -4,7 +4,7 @@ export interface IFilm extends Document {
   title: string; description?: string; genre?: string; duration?: string;
   videoLink?: string; videoUrl?: string; posterUrl?: string;
   userId: string; userEmail?: string; likes: number; likedBy: string[];
-  commentsCount: number; paid: boolean; isPrivate?: boolean; createdAt: Date; updatedAt: Date;
+  commentsCount: number; views: number; posterOffset?: number; paid: boolean; isPrivate?: boolean; createdAt: Date; updatedAt: Date;
 }
 
 const FilmSchema = new Schema<IFilm>({
@@ -14,7 +14,8 @@ const FilmSchema = new Schema<IFilm>({
   videoUrl: { type: String, default: '' }, posterUrl: { type: String, default: '' },
   userId: { type: String, required: true, index: true }, userEmail: { type: String },
   likes: { type: Number, default: 0 }, likedBy: [{ type: String }],
-  commentsCount: { type: Number, default: 0 }, paid: { type: Boolean, default: false },
+  commentsCount: { type: Number, default: 0 }, views: { type: Number, default: 0 },
+  posterOffset: { type: Number, default: 0 }, paid: { type: Boolean, default: false },
   isPrivate: { type: Boolean, default: false },
 }, { timestamps: true });
 

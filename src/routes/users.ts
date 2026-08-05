@@ -84,6 +84,7 @@ router.get('/search', async (req: AuthRequest, res: Response) => {
       filter.$or = [
         { fullName: { $regex: query, $options: 'i' } },
         { displayName: { $regex: query, $options: 'i' } },
+        { role: { $regex: query, $options: 'i' } },
         { bio: { $regex: query, $options: 'i' } },
         { location: { $regex: query, $options: 'i' } },
       ];

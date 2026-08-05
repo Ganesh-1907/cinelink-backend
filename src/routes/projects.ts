@@ -30,6 +30,10 @@ router.get('/', async (req: AuthRequest, res: Response) => {
 
     const filter: any = {};
 
+    if (req.query.createdBy) {
+      filter.createdBy = req.query.createdBy;
+    }
+
     // Search filter
     if (req.query.search) {
       const searchRegex = new RegExp(String(req.query.search), 'i');
@@ -272,10 +276,114 @@ router.put('/:id/requests/:requestId', async (req: AuthRequest, res: Response) =
   }
 });
 
-// Legacy direct join endpoint (supports fallback)
-router.post('/:id/join', async (req: AuthRequest, res: Response) => {
+// Send project invite
+router.post('/:id/invite', async (req: AuthRequest, res: Response) => {
   try {
-    await Project.findByIdAndUpdate(req.params.id, { $addToSet: { members: req.user!.id } });
+    const { userId, role } = req.body;
+    if (!userId || !role) {
+      return res.status(400).json({ error: 'userId and role are required' });
+    }
+
+    const project = await Project.findById(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    if (project.createdBy !== req.user!.id) {
+      return res.status(403).json({ error: 'Only the project creator can invite members' });
+    }
+
+    const targetUser = await User.findById(userId);
+    if (!targetUser) return res.status(404).json({ error: 'Invited user not found' });
+
+    if (project.members.includes(userId)) {
+      return res.status(400).json({ error: 'User is already a member of this project' });
+    }
+
+    const currentUser = await User.findById(req.user!.id);
+    const senderName = currentUser?.fullName || currentUser?.displayName || 'A director';
+
+    // Create notification of type 'project_invite'
+    const notif = await Notification.create({
+      userId,
+      type: 'project_invite',
+      title: '📩 Project Invitation',
+      message: `${senderName} invited you to join "${project.title}" as ${role}`,
+      senderId: req.user!.id,
+      projectId: project.id,
+      role
+    });
+
+    sendPushNotification(userId, 'Project Invitation', `${senderName} invited you to join "${project.title}"`).catch(() => {});
+
+    res.json({ success: true, notification: notif });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Respond to project invite
+router.post('/:id/respond-invite', async (req: AuthRequest, res: Response) => {
+  try {
+    const { status, role, notificationId } = req.body; // 'Accepted' | 'Rejected'
+    if (!['Accepted', 'Rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    const project = await Project.findById(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    if (status === 'Accepted') {
+      if (project.members.includes(req.user!.id)) {
+        return res.status(400).json({ error: 'You are already a member' });
+      }
+
+      const currentUser = await User.findById(req.user!.id);
+      const userName = currentUser?.fullName || currentUser?.displayName || 'User';
+
+      // Add member to project
+      await Project.findByIdAndUpdate(req.params.id, {
+        $addToSet: { members: req.user!.id }
+      });
+
+      // Update role status in project rolesNeeded
+      let roleFound = false;
+      project.rolesNeeded = project.rolesNeeded.map(r => {
+        if (r.role === role && !r.filled && !roleFound) {
+          roleFound = true;
+          return {
+            role: r.role,
+            filled: true,
+            memberId: req.user!.id,
+            memberName: userName
+          };
+        }
+        return r;
+      });
+      await project.save();
+
+      // Add to group chat if it exists
+      const chat = await Chat.findOne({ projectId: req.params.id, isGroupChat: true });
+      if (chat && !chat.participants.includes(req.user!.id)) {
+        chat.participants.push(req.user!.id);
+        chat.participantNames.push(userName);
+        await chat.save();
+      }
+
+      // Notify director
+      await Notification.create({
+        userId: project.createdBy,
+        type: 'project_accepted',
+        title: '✅ Invitation Accepted!',
+        message: `${userName} accepted your invitation to join "${project.title}" as ${role}`,
+        senderId: req.user!.id
+      });
+      sendPushNotification(project.createdBy, 'Invitation Accepted', `${userName} joined your project`).catch(() => {});
+    }
+
+    // Delete or mark the invite notification as read
+    if (notificationId) {
+      await Notification.findByIdAndDelete(notificationId);
+    }
+
     res.json({ success: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });

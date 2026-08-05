@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import FeedPost from '../models/FeedPost';
+import User from '../models/User';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -9,7 +10,22 @@ router.get('/', async (req: AuthRequest, res: Response) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 50, 100);
     const posts = await FeedPost.find().sort({ createdAt: -1 }).limit(limit);
-    res.json({ posts });
+    const userIds = [...new Set(posts.map(p => p.userId).filter(Boolean))];
+    const users = await User.find({ _id: { $in: userIds } }).select('fullName displayName photoUrl photoURL role');
+    const userMap = new Map(users.map(u => [u._id.toString(), u]));
+
+    const postsWithCreator = posts.map(p => {
+      const u = userMap.get(p.userId);
+      return {
+        ...p.toObject(),
+        creatorName: u?.fullName || u?.displayName || 'Community Member',
+        creatorPhotoUrl: u?.photoUrl || u?.photoURL || null,
+        creatorRole: u?.role || 'Creator',
+        id: p._id.toString(),
+      };
+    });
+
+    res.json({ posts: postsWithCreator });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

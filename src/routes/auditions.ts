@@ -16,7 +16,22 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       ],
     };
     const auditions = await Audition.find(filter).sort({ createdAt: -1 }).limit(50);
-    res.json({ auditions });
+    const directorIds = [...new Set(auditions.map(a => a.directorId || a.postedById).filter(Boolean))];
+    const users = await User.find({ _id: { $in: directorIds } }).select('fullName displayName photoUrl photoURL role');
+    const userMap = new Map(users.map(u => [u._id.toString(), u]));
+
+    const auditionsWithDirector = auditions.map(a => {
+      const u = userMap.get((a.directorId || a.postedById)?.toString());
+      return {
+        ...a.toObject(),
+        directorName: u?.fullName || u?.displayName || a.directorName || 'Director',
+        directorPhotoUrl: u?.photoUrl || u?.photoURL || null,
+        directorRole: u?.role || 'Casting Director',
+        id: a._id.toString(),
+      };
+    });
+
+    res.json({ auditions: auditionsWithDirector });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -24,8 +39,18 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
   try {
     const audition = await Audition.findById(req.params.id);
     if (!audition) return res.status(404).json({ error: 'Not found' });
+    const u = await User.findById(audition.directorId || audition.postedById).select('fullName displayName photoUrl photoURL role');
     await Audition.findByIdAndUpdate(req.params.id, { $inc: { views: 1 } });
-    res.json({ audition: { ...audition.toObject(), views: (audition.views || 0) + 1 } });
+    res.json({
+      audition: {
+        ...audition.toObject(),
+        directorName: u?.fullName || u?.displayName || audition.directorName || 'Director',
+        directorPhotoUrl: u?.photoUrl || u?.photoURL || null,
+        directorRole: u?.role || 'Casting Director',
+        views: (audition.views || 0) + 1,
+        id: audition._id.toString(),
+      }
+    });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
